@@ -1,0 +1,673 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "rhel-openssl-1.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_DATABASE_URL")
+}
+
+model User {
+  createdProposals Proposal[] @relation("CreatedProposals")
+  id                  String         @id @default(cuid())
+  name                String
+  email               String         @unique
+  emailVerified       Boolean        @default(false)
+  image               String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  role                String?        @default("telecaller")
+  roleId              String?
+  userRole            Role?          @relation(fields: [roleId], references: [id])
+  branch              String?
+  banned              Boolean?
+  banReason           String?
+  banExpires          DateTime?
+  password            String?
+  accounts            Account[]
+  sessions            Session[]
+  createdAdmissions   Admission[]    @relation("CreatedAdmissions")
+  handledAdmissions   Admission[]    @relation("HandledAdmissions")
+  assignedAdmissions  Admission[]    @relation("AssignedAdmissions")
+  createdCallLogs     CallLog[]      @relation("CreatedCallLogs")
+  assignedByEnquiries Enquiry[]      @relation("AssignedByEnquiries")
+  assignedEnquiries   Enquiry[]      @relation("AssignedEnquiries")
+  createdEnquiries    Enquiry[]      @relation("CreatedEnquiries")
+  expenses            Expense[]
+  createdFollowUps    FollowUp[]     @relation("CreatedFollowUps")
+  createdInvoices     Invoice[]      @relation("CreatedInvoices")
+  createdCustomers    Customer[]     @relation("CreatedCustomers")
+  receivedInvoicePayments Payment[]   @relation("RecordedInvoicePayments")
+  invoiceActivities   InvoiceActivity[]
+  receivedJobLeads    JobLead[]      @relation("JobLeadAssignee")
+  assignedJobLeads    JobLead[]      @relation("JobLeadAssigner")
+  assignedJobOrders   JobOrder[]     @relation("JobOrderAssigner")
+  managedJobOrders    JobOrder[]     @relation("ManagedJobOrders")
+  notifications       Notification[]
+  createdReceipts     Receipt[]      @relation("CreatedReceipts")
+
+  @@map("user")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+
+  @@map("role")
+}
+
+model Branch {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  address   String?
+  phone     String?
+  email     String?
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  enquiries Enquiry[]
+  jobOrders JobOrder[]
+
+  @@map("branch")
+}
+
+model Course {
+  id           String      @id @default(cuid())
+  name         String
+  description  String?
+  duration     String?
+  courseFee    Decimal? @db.Decimal(19, 4)
+  admissionFee Decimal? @db.Decimal(19, 4)
+  semesterFee  Decimal? @db.Decimal(19, 4)
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  admissions   Admission[]
+  enquiries    Enquiry[]
+  receipts     Receipt[]
+
+  @@map("course")
+}
+
+model Service {
+  id        String    @id @default(cuid())
+  name      String
+  price     Decimal     @default(0) @db.Decimal(19, 4)
+  updatedAt DateTime  @updatedAt
+  createdAt DateTime  @default(now())
+  isActive  Boolean   @default(true)
+  enquiries Enquiry[]
+
+  @@map("service")
+}
+
+model EnquirySource {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  enquiries Enquiry[]
+
+  @@map("enquiry_source")
+}
+
+model Enquiry {
+  proposals Proposal[]
+  id                String         @id @default(cuid())
+  candidateName     String
+  phone             String
+  contact2          String?
+  email             String?
+  address           String?
+  status            EnquiryStatus  @default(NEW)
+  notes             String?
+  feedback          String?
+  lastContactDate   DateTime?
+  branchId          String?
+  preferredCourseId String?
+  assignedToUserId  String?
+  createdByUserId   String?
+  assignedByUserId  String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  serviceId         String?
+  source            String?
+  sourceId          String?
+  admissions        Admission[]
+  callLogs          CallLog[]
+  assignedBy        User?          @relation("AssignedByEnquiries", fields: [assignedByUserId], references: [id])
+  assignedTo        User?          @relation("AssignedEnquiries", fields: [assignedToUserId], references: [id])
+  branch            Branch?        @relation(fields: [branchId], references: [id])
+  createdBy         User?          @relation("CreatedEnquiries", fields: [createdByUserId], references: [id])
+  preferredCourse   Course?        @relation(fields: [preferredCourseId], references: [id])
+  service           Service?       @relation(fields: [serviceId], references: [id])
+  enquirySource     EnquirySource? @relation(fields: [sourceId], references: [id])
+  followUps         FollowUp[]
+  jobLeads          JobLead[]
+
+  @@index([status])
+  @@index([branchId])
+  @@index([assignedToUserId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@map("enquiry")
+}
+
+model FollowUp {
+  id              String         @id @default(cuid())
+  scheduledAt     DateTime
+  status          FollowUpStatus @default(PENDING)
+  outcome         String?
+  notes           String?
+  enquiryId       String
+  createdByUserId String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  createdBy       User           @relation("CreatedFollowUps", fields: [createdByUserId], references: [id])
+  enquiry         Enquiry        @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
+
+  @@index([enquiryId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("follow_up")
+}
+
+model CallLog {
+  id              String   @id @default(cuid())
+  callDate        DateTime @default(now())
+  duration        Int?
+  outcome         String?
+  notes           String?
+  enquiryId       String
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       User     @relation("CreatedCallLogs", fields: [createdByUserId], references: [id])
+  enquiry         Enquiry  @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
+
+  @@index([enquiryId])
+  @@index([createdAt])
+  @@map("call_log")
+}
+
+model Admission {
+  serviceBills ServiceBill[]
+  id                String           @id @default(cuid())
+  admissionNumber   String           @unique
+  candidateName     String
+  mobileNumber      String
+  email             String?
+  gender            AdmissionGender?
+  dateOfBirth       DateTime?
+  address           String
+  leadSource        String?
+  lastQualification String?
+  yearOfPassing     Int?
+  percentageCGPA    String?
+  instituteName     String?
+  additionalNotes   String?
+  balance           Decimal            @default(0) @db.Decimal(19, 4)
+  nextDueDate       DateTime?
+  status            AdmissionStatus  @default(PENDING)
+  enquiryId         String?
+  courseId          String
+  agentName         String?
+  agentCommission   Decimal? @db.Decimal(19, 4)
+  createdByUserId   String
+  handledByUserId   String?
+  assignedToUserId  String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  course            Course           @relation(fields: [courseId], references: [id])
+  createdBy         User             @relation("CreatedAdmissions", fields: [createdByUserId], references: [id])
+  enquiry           Enquiry?         @relation(fields: [enquiryId], references: [id])
+  handledBy         User?            @relation("HandledAdmissions", fields: [handledByUserId], references: [id])
+  assignedTo        User?            @relation("AssignedAdmissions", fields: [assignedToUserId], references: [id])
+  receipts          Receipt[]
+
+  @@index([admissionNumber])
+  @@index([status])
+  @@index([courseId])
+  @@index([assignedToUserId])
+  @@index([createdAt])
+  @@map("admission")
+}
+
+model Receipt {
+  id               String           @id @default(cuid())
+  receiptNumber    String           @unique
+  amountCollected  Decimal @db.Decimal(19, 4)
+  collectedTowards CollectedTowards
+  paymentDate      DateTime         @default(now())
+  paymentMode      String?
+  transactionId    String?
+  notes            String?
+  admissionId      String
+  courseId         String
+  createdById      String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  admission        Admission        @relation(fields: [admissionId], references: [id])
+  course           Course           @relation(fields: [courseId], references: [id])
+  createdBy        User             @relation("CreatedReceipts", fields: [createdById], references: [id])
+
+  @@index([receiptNumber])
+  @@index([admissionId])
+  @@index([paymentDate])
+  @@map("receipt")
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  billedTo        String
+  invoiceDate     DateTime      @default(now())
+  dueDate         DateTime?
+  subtotal        Decimal         @default(0) @db.Decimal(19, 4)
+  taxRate         Decimal         @default(0.18) @db.Decimal(9, 6)
+  taxAmount       Decimal         @default(0) @db.Decimal(19, 4)
+  discountAmount Decimal         @default(0) @db.Decimal(19, 4)
+  withholdingAmount Decimal       @default(0) @db.Decimal(19, 4)
+  withholdingType String?
+  serviceCharge   Decimal         @default(0) @db.Decimal(19, 4)
+  otherCharges    Decimal         @default(0) @db.Decimal(19, 4)
+  totalAmount     Decimal         @default(0) @db.Decimal(19, 4)
+  status          InvoiceStatus @default(DRAFT)
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  customerId      String?
+  amountPaid      Decimal         @default(0) @db.Decimal(19, 4)
+  balanceDue      Decimal         @default(0) @db.Decimal(19, 4)
+  shareToken      String?       @unique
+  remindersEnabled Boolean      @default(false)
+  reminderRules   String[]      @default([])
+  createdBy       User          @relation("CreatedInvoices", fields: [createdByUserId], references: [id])
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items           InvoiceItem[]
+  payments        Payment[]
+  activities      InvoiceActivity[]
+
+  @@index([invoiceNumber])
+  @@index([customerId])
+  @@index([status])
+  @@index([invoiceDate])
+  @@map("invoice")
+}
+
+model Customer {
+  id              String    @id @default(cuid())
+  name            String
+  email           String?
+  phone           String?
+  address         String?
+  state           String?
+  gstin           String?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdBy       User?     @relation("CreatedCustomers", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  invoices        Invoice[]
+  invoicePayments Payment[]
+
+  @@index([name])
+  @@index([email])
+  @@index([phone])
+  @@index([createdByUserId])
+  @@map("customer")
+}
+
+model InvoiceItem {
+  id              String   @id @default(cuid())
+  itemDescription String
+  quantity        Int
+  unitPrice       Decimal @db.Decimal(19, 4)
+  lineTotal       Decimal @db.Decimal(19, 4)
+  invoiceId       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_item")
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  invoiceId       String
+  customerId      String?
+  paymentNumber   String   @unique
+  paymentDate     DateTime @default(now())
+  amount          Decimal @db.Decimal(19, 4)
+  paymentMode     String
+  depositTo       String?
+  referenceNumber String?
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy       User     @relation("RecordedInvoicePayments", fields: [createdByUserId], references: [id])
+
+  @@index([invoiceId, paymentDate])
+  @@index([customerId])
+  @@map("payment")
+}
+
+model PaymentNumberSettings {
+  id                     String   @id @default("default")
+  autoGenerate           Boolean  @default(true)
+  prefix                 String   @default("PAY-")
+  nextNumber             Int      @default(1)
+  padding                Int      @default(6)
+  restartEachFiscalYear  Boolean  @default(false)
+  lastResetFiscalYear    Int?
+  updatedAt              DateTime @updatedAt
+
+  @@map("payment_number_settings")
+}
+
+model InvoiceActivity {
+  id              String   @id @default(cuid())
+  invoiceId       String
+  userId          String
+  type            String
+  message         String
+  createdAt       DateTime @default(now())
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([invoiceId, createdAt])
+  @@map("invoice_activity")
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  title       String
+  description String?
+  amount      Decimal @db.Decimal(19, 4)
+  category    ExpenseCategory
+  expenseDate DateTime
+  notes       String?
+  createdById String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  createdBy   User            @relation(fields: [createdById], references: [id])
+
+  @@index([category])
+  @@index([expenseDate])
+  @@map("expense")
+}
+
+model JobOrder {
+  id          String    @id @default(cuid())
+  jobCode     String?
+  name        String
+  description String?
+  remarks     String?
+  managerId   String
+  assignerId  String?
+  branchId    String
+  startDate   DateTime
+  endDate     DateTime
+  createdAt   DateTime  @default(now())
+  jobLeads    JobLead[]
+  assigner    User?     @relation("JobOrderAssigner", fields: [assignerId], references: [id])
+  branch      Branch    @relation(fields: [branchId], references: [id])
+  manager     User      @relation("ManagedJobOrders", fields: [managerId], references: [id])
+
+  @@index([branchId])
+  @@index([managerId])
+  @@index([startDate])
+  @@index([endDate])
+  @@map("job_order")
+}
+
+model JobLead {
+  id         String        @id @default(cuid())
+  jobId      String
+  status     JobLeadStatus @default(PENDING)
+  leadId     String
+  assignerId String?
+  assigneeId String?
+  assignee   User?         @relation("JobLeadAssignee", fields: [assigneeId], references: [id])
+  assigner   User?         @relation("JobLeadAssigner", fields: [assignerId], references: [id])
+  job        JobOrder      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  lead       Enquiry       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([leadId])
+  @@index([assigneeId])
+  @@index([status])
+  @@map("job_lead")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(GENERAL)
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notification")
+}
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  CONFIRMED
+  NOT_INTERESTED
+  FOLLOW_UP
+  DROPPED
+  INVALID
+}
+
+enum FollowUpStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum AdmissionGender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum AdmissionStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum CollectedTowards {
+  ADMISSION_FEE
+  COURSE_FEE
+  SEMESTER_FEE
+  OTHER
+}
+
+enum ExpenseCategory {
+  OFFICE_SUPPLIES
+  TRAVEL
+  UTILITIES
+  MARKETING
+  MEALS
+  EQUIPMENT
+  SOFTWARE
+  OTHER
+}
+
+enum JobLeadStatus {
+  PENDING
+  CLOSED
+}
+
+enum NotificationType {
+  ENQUIRY_ASSIGNED
+  JOB_ORDER_ASSIGNED
+  FOLLOW_UP_ASSIGNED
+  GENERAL
+}
+
+
+model ServiceBill {
+  id          String            @id @default(cuid())
+  serviceIds  String[]
+  total       Decimal             @default(0) @db.Decimal(19, 4)
+  status      BillingStatus     @default(UNPAID)
+  billId      String            @unique
+  paid        Decimal             @default(0) @db.Decimal(19, 4)
+  balance     Decimal             @default(0) @db.Decimal(19, 4)
+  billDate    DateTime          @default(now())
+  admissionId String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  admission   Admission         @relation(fields: [admissionId], references: [id])
+  items       ServiceBillItem[]
+
+  @@index([admissionId])
+  @@index([billId])
+  @@index([status])
+  @@index([billDate])
+  @@map("service_bill")
+}
+
+model ServiceBillItem {
+  id            String      @id @default(cuid())
+  serviceBillId String
+  amount        Decimal @db.Decimal(19, 4)
+  paymentMode   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  serviceBill   ServiceBill @relation(fields: [serviceBillId], references: [id], onDelete: Cascade)
+
+  @@index([serviceBillId])
+  @@map("service_bill_item")
+}
+
+model Proposal {
+  id            String         @id @default(cuid())
+  proposalNo    String         @unique
+  title         String?
+  enquiryId     String?
+  clientName    String
+  clientEmail   String?
+  clientPhone   String?
+  clientAddress String?
+  branch        String?
+  branchId      String?
+  status        String         @default("DRAFT")
+  validUntil    DateTime?
+  subtotal      Decimal          @default(0) @db.Decimal(19, 4)
+  taxRate       Decimal          @default(0) @db.Decimal(9, 6)
+  taxAmount     Decimal          @default(0) @db.Decimal(19, 4)
+  discountAmount Decimal         @default(0) @db.Decimal(19, 4)
+  totalAmount   Decimal          @default(0) @db.Decimal(19, 4)
+  notes         String?
+  terms         String?
+  createdById   String?
+  createdByUser String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  items         ProposalItem[]
+  enquiry       Enquiry?       @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation("CreatedProposals", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([proposalNo])
+  @@index([enquiryId])
+  @@index([branchId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("proposal")
+}
+
+model ProposalItem {
+  id          String   @id @default(cuid())
+  proposalId  String
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal    @default(0) @db.Decimal(19, 4)
+  total       Decimal    @default(0) @db.Decimal(19, 4)
+  panelBrand  String?
+  systemPrice Decimal? @db.Decimal(19, 4)
+  ksebFee     Decimal? @db.Decimal(19, 4)
+  afterSubsidy Decimal? @db.Decimal(19, 4)
+  itemTaxRate Decimal  @default(0) @db.Decimal(9, 6)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+  @@map("proposal_item")
+}
+
+enum BillingStatus {
+  UNPAID
+  PAID
+  PARTIALLY_PAID
+}
