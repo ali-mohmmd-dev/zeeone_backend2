@@ -15,7 +15,11 @@ const corsPlugin: FastifyPluginAsync = async (fastify) => {
         cb(null, true);
         return;
       }
-      if (allowedOrigins.includes(origin)) {
+      if (
+        allowedOrigins.includes(origin) ||
+        origin === 'https://willowycrm.vercel.app' ||
+        origin.endsWith('.vercel.app')
+      ) {
         cb(null, true);
         return;
       }

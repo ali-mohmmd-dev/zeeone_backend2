@@ -24,9 +24,7 @@ export async function assignEnquiries(prisma: PrismaClient, user: AssignmentUser
   if (user.role !== 'admin' && (!user.branch || user.branch !== data.branchId)) {
     throw new ForbiddenError('You can only assign enquiries within your branch');
   }
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (data.startDate < today) throw new BadRequestError('Start date cannot be in the past');
+  // Past start dates allowed
   if (data.startDate > data.endDate) throw new BadRequestError('Start date cannot be after end date');
 
   return prisma.$transaction(async (tx) => {
