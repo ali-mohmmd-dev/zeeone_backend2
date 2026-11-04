@@ -136,38 +136,54 @@ export class EnquiryService {
     }, logStep?: (step: string, fields?: Record<string, unknown>) => void) {
         const role = (user.role || '').toLowerCase();
         const branchScoped = ['telecaller', 'executive', 'manager', 'branch manager'].includes(role);
-        const branchId = branchScoped && user.branch ? user.branch : input.branchId;
+        const rawBranchId = input.branchId?.trim() || null;
+        const branchId = branchScoped && user.branch ? user.branch : rawBranchId;
         logStep?.('scope_resolved', { hasBranch: Boolean(branchId), role: user.role });
         if (!branchId)
             throw new BadRequestError('Branch is required');
-        const assignedToUserId = input.assignedToUserId || (role === 'telecaller' ? user.id : null);
+
+        const preferredCourseId = input.preferredCourseId?.trim() || null;
+        const serviceId = input.serviceId?.trim() || null;
+        const sourceId = input.sourceId?.trim() || null;
+        const assignedToUserId = input.assignedToUserId?.trim() || (role === 'telecaller' ? user.id : null);
+
         logStep?.('database_insert_started');
         const enquiry = await this.prisma.enquiry.create({
             data: {
                 ...input,
                 branchId,
-                email: input.email || null,
-                sourceId: input.sourceId || null,
-                serviceId: input.serviceId || null,
-                preferredCourseId: input.preferredCourseId || null,
-                createdByUserId: input.createdByUserId || user.id,
+                email: input.email?.trim() || null,
+                contact2: input.contact2?.trim() || null,
+                address: input.address?.trim() || null,
+                notes: input.notes?.trim() || null,
+                feedback: input.feedback?.trim() || null,
+                source: input.source?.trim() || null,
+                sourceId,
+                serviceId,
+                preferredCourseId,
+                createdByUserId: input.createdByUserId?.trim() || user.id,
                 assignedToUserId,
                 assignedByUserId: assignedToUserId ? user.id : null,
             },
         });
         logStep?.('database_insert_succeeded', { recordId: enquiry.id });
-        if (input.assignedToUserId) {
-            logStep?.('assignment_notification_started');
-            await this.prisma.notification.create({
-                data: {
-                    userId: input.assignedToUserId,
-                    title: 'New Enquiry Assigned',
-                    message: `You have been assigned enquiry: ${enquiry.candidateName}`,
-                    type: NotificationType.ENQUIRY_ASSIGNED,
-                    link: `/enquiries/${enquiry.id}`,
-                },
-            });
-            logStep?.('assignment_notification_succeeded');
+
+        if (assignedToUserId) {
+            try {
+                logStep?.('assignment_notification_started');
+                await this.prisma.notification.create({
+                    data: {
+                        userId: assignedToUserId,
+                        title: 'New Enquiry Assigned',
+                        message: `You have been assigned enquiry: ${enquiry.candidateName}`,
+                        type: NotificationType.ENQUIRY_ASSIGNED,
+                        link: `/enquiries/${enquiry.id}`,
+                    },
+                });
+                logStep?.('assignment_notification_succeeded');
+            } catch (notifErr) {
+                logStep?.('assignment_notification_failed', { err: String(notifErr) });
+            }
         }
         return enquiry;
     }
@@ -196,6 +212,18 @@ export class EnquiryService {
         if (role === 'executive' && enquiry.createdByUserId !== user.id && enquiry.assignedToUserId !== user.id) {
             throw new ForbiddenError('You can only delete enquiries you created or are assigned to');
         }
+
+        // Safely detach any linked admissions before deleting
+        await this.prisma.admission.updateMany({
+            where: { enquiryId: id },
+            data: { enquiryId: null },
+        });
+
+        // Delete cascade relations if any remain
+        await this.prisma.jobLead.deleteMany({ where: { leadId: id } });
+        await this.prisma.followUp.deleteMany({ where: { enquiryId: id } });
+        await this.prisma.callLog.deleteMany({ where: { enquiryId: id } });
+
         return this.prisma.enquiry.delete({ where: { id } });
     }
     async changeStatus(id: string, input: ChangeEnquiryStatusInput, _currentUserId: string) {
