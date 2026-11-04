@@ -46,16 +46,7 @@ export function createJobOrderService(prisma: PrismaClient, currentUser: Workflo
             }
             // Validate dates
             // Validate dates
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
-            if (start < today) {
-                return {
-                    success: false,
-                    message: 'Start date cannot be in the past',
-                };
-            }
+            // Past start dates allowed
             if (startDate > endDate) {
                 return {
                     success: false,
