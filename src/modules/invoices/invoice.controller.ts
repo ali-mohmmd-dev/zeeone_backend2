@@ -41,8 +41,8 @@ export class InvoiceController {
   static async deleteInvoice(request: FastifyRequest, reply: FastifyReply) {
     const { id } = request.params as { id: string };
     const service = new InvoiceService(request.server.prisma);
-    await service.deleteInvoice(id);
-    return reply.send(successResponse(null, 'Invoice deleted successfully'));
+    await service.deleteInvoice(id, request.user.id);
+    return reply.send(successResponse(null, 'Invoice cancelled successfully'));
   }
 
   static async generatePDF(request: FastifyRequest, reply: FastifyReply) {

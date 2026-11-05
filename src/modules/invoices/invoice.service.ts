@@ -1,5 +1,5 @@
 import { decimal, roundMoney } from '../../shared/utils/money.js';
-﻿import { PrismaClient, Prisma, InvoiceStatus } from '@prisma/client';
+import { PrismaClient, Prisma, InvoiceStatus } from '@prisma/client';
 import { BadRequestError, NotFoundError } from '../../errors/app-error.js';
 import { PDFService } from '../../services/pdf/pdf.service.js';
 import { CreateInvoiceInput, InvoiceFilterInput, UpdateInvoiceInput } from './invoice.schema.js';
@@ -219,9 +219,11 @@ export class InvoiceService {
           otherCharges,
           totalAmount,
           balanceDue,
-          status: decimal(existing.amountPaid).greaterThan(0)
-            ? balanceDue.isZero() ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID
-            : (input.status ?? existing.status) as InvoiceStatus,
+          status: input.status === InvoiceStatus.CANCELLED || (existing.status === InvoiceStatus.CANCELLED && input.status === undefined)
+            ? InvoiceStatus.CANCELLED
+            : decimal(existing.amountPaid).greaterThan(0)
+              ? balanceDue.isZero() ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID
+              : (input.status ?? existing.status) as InvoiceStatus,
           notes: input.notes,
         },
         include: {
@@ -251,8 +253,9 @@ export class InvoiceService {
       const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
       if (!invoice) throw new NotFoundError('Invoice');
       const lineTotal = decimal(input.unitPrice).times(input.quantity);
-      await tx.invoiceItem.create({ data: { invoiceId, ...input, lineTotal } });
-      return this.recalculateInvoice(tx, invoiceId, userId, `Item added: ${input.itemDescription}`);
+      const addedItem = await tx.invoiceItem.create({ data: { invoiceId, ...input, lineTotal } });
+      const updated = await this.recalculateInvoice(tx, invoiceId, userId, `Item added: ${input.itemDescription}`);
+      return { ...updated, addedItem };
     });
   }
 
@@ -288,15 +291,34 @@ export class InvoiceService {
     const totalAmount = roundMoney(Prisma.Decimal.max(0, grossAmount.plus(additionalCharges).minus(invoice.withholdingAmount)));
     if (totalAmount.lessThan(invoice.amountPaid)) throw new BadRequestError('Invoice total cannot be reduced below the amount already paid');
     const balanceDue = roundMoney(totalAmount.minus(invoice.amountPaid));
-    const status = decimal(invoice.amountPaid).greaterThan(0) ? balanceDue.isZero() ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID : invoice.status;
+    const status = invoice.status === InvoiceStatus.CANCELLED ? InvoiceStatus.CANCELLED
+      : decimal(invoice.amountPaid).greaterThan(0) ? balanceDue.isZero() ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID : invoice.status;
     await tx.invoice.update({ where: { id: invoiceId }, data: { subtotal, taxAmount, totalAmount, balanceDue, status } });
     await tx.invoiceActivity.create({ data: { invoiceId, userId, type: 'invoice_updated', message } });
     return tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { items: true } });
   }
 
-  async deleteInvoice(id: string) {
-    await this.getInvoiceById(id);
-    return this.prisma.invoice.delete({ where: { id } });
+  async deleteInvoice(id: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "invoice" WHERE "id" = ${id} FOR UPDATE`);
+      const existing = await tx.invoice.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundError('Invoice');
+      const invoice = await tx.invoice.update({
+        where: { id },
+        data: { status: InvoiceStatus.CANCELLED, shareToken: null, remindersEnabled: false },
+      });
+      if (existing.status !== InvoiceStatus.CANCELLED) {
+        await tx.invoiceActivity.create({ data: { invoiceId: id, userId, type: 'cancelled', message: 'Invoice cancelled; payment history retained' } });
+      }
+      return invoice;
+    });
+  }
+
+  async recalculateTotals(invoiceId: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "invoice" WHERE "id" = ${invoiceId} FOR UPDATE`);
+      return this.recalculateInvoice(tx, invoiceId, userId, 'Invoice totals recalculated');
+    });
   }
 
   async generatePDF(id: string) {

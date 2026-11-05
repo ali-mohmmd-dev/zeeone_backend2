@@ -1,5 +1,6 @@
+import { InvoiceService } from '../invoices/invoice.service.js';
 import { taxRateSchema, moneySchema } from '../../shared/utils/money.schemas.js';
-import { decimal, roundMoney } from '../../shared/utils/money.js';
+import { decimal } from '../../shared/utils/money.js';
 import type { PrismaClient } from '@prisma/client';
 import type { WorkflowUser } from './workflow-user.js';
 import { z } from 'zod';
@@ -25,26 +26,6 @@ export function createInvoiceActionsService(prisma: PrismaClient, currentUser: W
             .toString()
             .padStart(4, '0');
         return `INV-${year}${month}${day}-${random}`;
-    }
-    function calculateTotals(items: Array<{
-        quantity: number;
-        unitPrice: Prisma.Decimal.Value;
-    }>, taxRate: Prisma.Decimal.Value, serviceCharge: Prisma.Decimal.Value = 0, otherCharges: Prisma.Decimal.Value = 0, taxRounding: string = 'exact') {
-        const subtotal = items.reduce((sum, item) => sum.plus(decimal(item.unitPrice).times(item.quantity)), decimal(0));
-        const taxableAmount = subtotal.plus(serviceCharge).plus(otherCharges);
-        let taxAmount = taxableAmount.times(taxRate);
-        if (taxRounding === 'round_off') {
-            const itemTax = items.reduce((sum, item) => {
-                const lineTax = decimal(item.unitPrice).times(item.quantity).times(taxRate);
-                return sum.plus(roundMoney(lineTax));
-            }, decimal(0));
-            taxAmount = itemTax.plus(roundMoney(decimal(serviceCharge).times(taxRate))).plus(roundMoney(decimal(otherCharges).times(taxRate)));
-        }
-        return {
-            subtotal: roundMoney(subtotal),
-            taxAmount: roundMoney(taxAmount),
-            totalAmount: roundMoney(taxableAmount.plus(taxAmount)),
-        };
     }
     const createInvoiceSchema = z.object({
         billedTo: z.string().min(1, 'Billed to is required'),
@@ -153,85 +134,16 @@ export function createInvoiceActionsService(prisma: PrismaClient, currentUser: W
         }
     }
     async function updateInvoice(input: unknown) {
-        const parsedInput = updateInvoiceSchema.parse(input ?? {});
-        try {
-            const { id, ...updateData } = parsedInput;
-            // Check if invoice exists and user has permission
-            const existingInvoice = await prisma.invoice.findUnique({
-                where: { id },
-                include: { items: true },
-            });
-            if (!existingInvoice) {
-                throw new Error('Invoice not found');
-            }
-            // Build update data
-            const data: Record<string, unknown> = {};
-            if (updateData.billedTo)
-                data.billedTo = updateData.billedTo;
-            if (updateData.invoiceDate)
-                data.invoiceDate = updateData.invoiceDate;
-            if (updateData.dueDate !== undefined)
-                data.dueDate = updateData.dueDate;
-            if (updateData.notes !== undefined)
-                data.notes = updateData.notes;
-            if (updateData.status)
-                data.status = updateData.status;
-            // If tax rate, service charge, or other charges are updated, recalculate totals
-            if (updateData.taxRate !== undefined || updateData.serviceCharge !== undefined || updateData.otherCharges !== undefined) {
-                data.taxRate = updateData.taxRate ?? existingInvoice.taxRate;
-                data.serviceCharge = updateData.serviceCharge ?? existingInvoice.serviceCharge;
-                data.otherCharges = updateData.otherCharges ?? existingInvoice.otherCharges;
-                const totals = calculateTotals(existingInvoice.items, data.taxRate as Prisma.Decimal.Value, data.serviceCharge as Prisma.Decimal.Value, data.otherCharges as Prisma.Decimal.Value, 'exact');
-                data.subtotal = totals.subtotal;
-                data.taxAmount = totals.taxAmount;
-                data.totalAmount = totals.totalAmount;
-            }
-            const invoice = await prisma.invoice.update({
-                where: { id },
-                data,
-                include: {
-                    items: true,
-                    createdBy: {
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true,
-                        },
-                    },
-                },
-            });
-            await invalidateDashboardCache();
-            return { success: true, data: invoice, message: 'Invoice updated successfully' };
-        }
-        catch (error) {
-            console.error('Error updating invoice:', error);
-            throw new Error('Failed to update invoice');
-        }
+        const { id, taxRounding, ...data } = updateInvoiceSchema.parse(input ?? {});
+        const invoice = await new InvoiceService(prisma).updateInvoice(id, data, currentUser.id);
+        await invalidateDashboardCache();
+        return { success: true, data: invoice, message: 'Invoice updated successfully' };
     }
     async function deleteInvoice(input: unknown) {
-        const parsedInput = deleteInvoiceSchema.parse(input ?? {});
-        try {
-            // Check if invoice exists
-            const existingInvoice = await prisma.invoice.findUnique({
-                where: { id: parsedInput.id },
-            });
-            if (!existingInvoice) {
-                throw new Error('Invoice not found');
-            }
-            // Delete all invoice items first, then the invoice
-            await prisma.invoiceItem.deleteMany({
-                where: { invoiceId: parsedInput.id },
-            });
-            await prisma.invoice.delete({
-                where: { id: parsedInput.id },
-            });
-            await invalidateDashboardCache();
-            return { success: true, message: 'Invoice deleted successfully' };
-        }
-        catch (error) {
-            console.error('Error deleting invoice:', error);
-            throw new Error('Failed to delete invoice');
-        }
+        const { id } = deleteInvoiceSchema.parse(input ?? {});
+        await new InvoiceService(prisma).deleteInvoice(id, currentUser.id);
+        await invalidateDashboardCache();
+        return { success: true, message: 'Invoice cancelled successfully' };
     }
     const INVOICE_SORT_FIELDS = [
         'createdAt',
@@ -361,109 +273,29 @@ export function createInvoiceActionsService(prisma: PrismaClient, currentUser: W
             throw new Error('Failed to fetch invoice');
         }
     }
-    const addInvoiceItemSchema = createInvoiceItemSchema;
     async function addInvoiceItem(input: unknown) {
-        const parsedInput = addInvoiceItemSchema.parse(input ?? {});
-        try {
-            const lineTotal = decimal(parsedInput.quantity).times(parsedInput.unitPrice);
-            const invoiceItem = await prisma.invoiceItem.create({
-                data: {
-                    itemDescription: parsedInput.itemDescription,
-                    quantity: parsedInput.quantity,
-                    unitPrice: parsedInput.unitPrice,
-                    lineTotal: roundMoney(lineTotal),
-                    invoice: { connect: { id: parsedInput.invoiceId } },
-                },
-            });
-            // Recalculate invoice totals
-            await recalculateInvoiceTotals(parsedInput.invoiceId);
-            return { success: true, data: invoiceItem, message: 'Invoice item added successfully' };
-        }
-        catch (error) {
-            console.error('Error adding invoice item:', error);
-            throw new Error('Failed to add invoice item');
-        }
+        const { invoiceId, ...data } = createInvoiceItemSchema.parse(input ?? {});
+        const invoice = await new InvoiceService(prisma).addItem(invoiceId, data, currentUser.id);
+        await invalidateDashboardCache();
+        return { success: true, data: invoice.addedItem, message: 'Invoice item added successfully' };
     }
     async function updateInvoiceItem(input: unknown) {
-        const parsedInput = updateInvoiceItemSchema.parse(input ?? {});
-        try {
-            const { id, ...updateData } = parsedInput;
-            // Get current item to calculate new line total
-            const currentItem = await prisma.invoiceItem.findUnique({
-                where: { id },
-            });
-            if (!currentItem) {
-                throw new Error('Invoice item not found');
-            }
-            const quantity = updateData.quantity ?? currentItem.quantity;
-            const unitPrice = updateData.unitPrice ?? currentItem.unitPrice;
-            const lineTotal = roundMoney(decimal(unitPrice).times(quantity));
-            const invoiceItem = await prisma.invoiceItem.update({
-                where: { id },
-                data: {
-                    ...updateData,
-                    lineTotal,
-                },
-            });
-            // Recalculate invoice totals
-            await recalculateInvoiceTotals(currentItem.invoiceId);
-            return { success: true, data: invoiceItem, message: 'Invoice item updated successfully' };
-        }
-        catch (error) {
-            console.error('Error updating invoice item:', error);
-            throw new Error('Failed to update invoice item');
-        }
+        const { id, ...data } = updateInvoiceItemSchema.parse(input ?? {});
+        const invoice = await new InvoiceService(prisma).updateItem(id, data, currentUser.id);
+        await invalidateDashboardCache();
+        return { success: true, data: invoice.items.find(item => item.id === id), message: 'Invoice item updated successfully' };
     }
     async function deleteInvoiceItem(input: unknown) {
-        const parsedInput = deleteInvoiceItemSchema.parse(input ?? {});
-        try {
-            const item = await prisma.invoiceItem.findUnique({
-                where: { id: parsedInput.id },
-            });
-            if (!item) {
-                throw new Error('Invoice item not found');
-            }
-            await prisma.invoiceItem.delete({
-                where: { id: parsedInput.id },
-            });
-            // Recalculate invoice totals
-            await recalculateInvoiceTotals(item.invoiceId);
-            return { success: true, message: 'Invoice item deleted successfully' };
-        }
-        catch (error) {
-            console.error('Error deleting invoice item:', error);
-            throw new Error('Failed to delete invoice item');
-        }
+        const { id } = deleteInvoiceItemSchema.parse(input ?? {});
+        await new InvoiceService(prisma).deleteItem(id, currentUser.id);
+        await invalidateDashboardCache();
+        return { success: true, message: 'Invoice item deleted successfully' };
     }
-    async function recalculateInvoiceTotals(invoiceId: string) {
-        const invoice = await prisma.invoice.findUnique({
-            where: { id: invoiceId },
-            include: { items: true },
-        });
-        if (!invoice) {
-            throw new Error('Invoice not found');
-        }
-        const totals = calculateTotals(invoice.items, invoice.taxRate, invoice.serviceCharge, invoice.otherCharges, 'exact');
-        await prisma.invoice.update({
-            where: { id: invoiceId },
-            data: {
-                subtotal: totals.subtotal,
-                taxAmount: totals.taxAmount,
-                totalAmount: totals.totalAmount,
-            },
-        });
-    }
-    const calculateInvoiceTotalsSchema = getInvoiceByIdSchema;
     async function calculateInvoiceTotals(input: unknown) {
-        const parsedInput = calculateInvoiceTotalsSchema.parse(input ?? {});
-        try {
-            await recalculateInvoiceTotals(parsedInput.id);
-            return { success: true, message: 'Invoice totals recalculated successfully' };
-        }
-        catch (error) {
-            console.error('Error recalculating invoice totals:', error);
-            throw new Error('Failed to recalculate invoice totals');
-        }
+        const { id } = getInvoiceByIdSchema.parse(input ?? {});
+        await new InvoiceService(prisma).recalculateTotals(id, currentUser.id);
+        await invalidateDashboardCache();
+        return { success: true, message: 'Invoice totals recalculated successfully' };
     }
     return { createInvoice, updateInvoice, deleteInvoice, getInvoices, getInvoiceById, addInvoiceItem, updateInvoiceItem, deleteInvoiceItem, calculateInvoiceTotals };
 }

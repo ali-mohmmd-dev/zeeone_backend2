@@ -4,7 +4,6 @@ import { AppError } from '../errors/app-error.js';
 import { errorResponse } from '../utils/response.js';
 
 export function errorHandler(error: FastifyError | AppError | Error, request: FastifyRequest, reply: FastifyReply) {
-  request.log.error({ err: error, method: request.method, path: request.url.split('?')[0] }, 'Request failed');
   const record = (code: string, message: string, statusCode: number) => {
     request.completionError = { code, message, ...(statusCode >= 500 ? { err: error } : {}) };
   };

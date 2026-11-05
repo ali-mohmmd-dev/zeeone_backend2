@@ -73,3 +73,11 @@ test('changing a password updates both credential stores in one transaction', as
   assert.equal(updates[1].where.userId, admin.id);
   assert.equal(await bcrypt.compare('NewPassword!', updates[0].data.password), true);
 });
+
+
+test('user management filters inactive and banned accounts in the database query', async () => {
+  let query: any;
+  const prisma = { user: { findMany: async (input: any) => { query = input; return []; } } } as unknown as PrismaClient;
+  await createAuthService(prisma, admin).getAllUsers();
+  assert.deepEqual(query.where, { isActive: true, OR: [{ banned: false }, { banned: null }] });
+});

@@ -38,7 +38,7 @@ export async function authenticate(request: FastifyRequest, _reply: FastifyReply
       throw new UnauthorizedError('User account is banned');
     }
 
-    const permissions = decoded.permissions ?? getUserEffectivePermissions(user);
+    const permissions = getUserEffectivePermissions(user);
 
     const { password: _password, ...publicUser } = user;
     request.currentUser = {

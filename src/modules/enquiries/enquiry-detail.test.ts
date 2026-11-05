@@ -29,6 +29,10 @@ async function fixture(role: string | null = 'telecaller', found = true, source 
       update: async () => enquiry,
       delete: async () => enquiry,
     },
+    admission: { updateMany: async () => ({ count: 0 }) },
+    jobLead: { deleteMany: async () => ({ count: 0 }) },
+    followUp: { deleteMany: async () => ({ count: 0 }) },
+    callLog: { deleteMany: async () => ({ count: 0 }) },
     notification: { create: async () => ({}) },
   } as unknown as PrismaClient;
   const app = Fastify();

@@ -15,9 +15,11 @@ test('missing proposal tables return HTTP 503 instead of HTTP 200', async t => {
   let writes = 0;
   const prisma = {
     proposal: {
-      count: async () => { throw Object.assign(new Error('Missing table'), { code: 'P2021' }); },
+      findMany: async () => { throw Object.assign(new Error('Missing table'), { code: 'P2021' }); },
       create: async () => { writes++; },
     },
+    $queryRaw: async () => [],
+    $transaction: async function<T>(run: (tx: unknown) => Promise<T>) { return run(this); },
   } as unknown as PrismaClient;
   const app = Fastify();
   t.after(() => app.close());
@@ -35,9 +37,11 @@ test('proposal creation still uses the existing proposal number format', async (
   let record: Record<string, unknown> = {};
   const prisma = {
     proposal: {
-      count: async () => 2,
+      findMany: async () => [{ proposalNo: `PROP-${new Date().getFullYear()}-0002` }],
       create: async ({ data }: { data: Record<string, unknown> }) => { record = data; return { ...data, id: 'proposal-1' }; },
     },
+    $queryRaw: async () => [],
+    $transaction: async function<T>(run: (tx: unknown) => Promise<T>) { return run(this); },
   } as unknown as PrismaClient;
   const result = await createProposalProposalActionsService(prisma, user).createProposal(input);
   assert.equal(result.success, true);

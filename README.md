@@ -111,3 +111,7 @@ does not repair precision already lost in historical floating-point data.
 Regenerate the Prisma client after the schema change. Coordinate the response
 string handling with the frontend before deploying the backend and migration.
 "# zeeone_backend2" 
+
+## Meta Lead Ads
+
+See [Meta webhook setup](docs/meta-leads.md) for callback URLs, environment variables, the database migration, and recovery scheduling.

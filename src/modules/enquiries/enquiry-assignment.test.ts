@@ -65,11 +65,17 @@ test('bad dates and empty selections cannot reach the database', async () => {
   const db = fixture();
   await assert.rejects(assignEnquiries(db.prisma, user, [], input));
   await assert.rejects(assignEnquiries(db.prisma, user, ['lead-1'], { ...input, startDate: new Date('2100-01-01') }), /Start date/);
-  await assert.rejects(assignEnquiries(db.prisma, user, ['lead-1'], { ...input, startDate: new Date('2000-01-01') }), /past/);
   assert.equal(db.transactions(), 0);
 });
 
 test('a notification failure rejects the transaction instead of succeeding with a partial assignment', async () => {
   const db = fixture({ failNotification: true });
   await assert.rejects(assignEnquiries(db.prisma, user, ['lead-1'], input), /Notification failed/);
+});
+
+test('past start dates remain supported for historical job orders', async () => {
+  const db = fixture();
+  await assignEnquiries(db.prisma, user, ['lead-1'], { ...input, startDate: new Date('2000-01-01') });
+  assert.equal(db.transactions(), 1);
+  assert.equal(db.writes[1].data.startDate.getUTCFullYear(), 2000);
 });

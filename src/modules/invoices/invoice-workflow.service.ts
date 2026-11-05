@@ -16,7 +16,7 @@ export async function recordPaymentTx(
 ) {
   const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
   if (!invoice) throw new NotFoundError('Invoice');
-  if (!options.allowDraft && (invoice.status === InvoiceStatus.DRAFT || invoice.status === InvoiceStatus.CANCELLED)) {
+  if (invoice.status === InvoiceStatus.CANCELLED || (!options.allowDraft && invoice.status === InvoiceStatus.DRAFT)) {
     throw new BadRequestError('Payments cannot be recorded for draft or cancelled invoices');
   }
   const amount = roundMoney(input.amount);
@@ -108,9 +108,8 @@ export class InvoiceWorkflowService {
       const aggregate = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       const amountPaid = roundMoney(aggregate._sum.amount ?? 0);
       const balanceDue = roundMoney(Prisma.Decimal.max(0, decimal(invoice.totalAmount).minus(amountPaid)));
-      const status = amountPaid.greaterThan(0)
-        ? balanceDue.isZero() ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID
-        : invoice.status === InvoiceStatus.CANCELLED ? invoice.status
+      const status = invoice.status === InvoiceStatus.CANCELLED ? InvoiceStatus.CANCELLED
+        : amountPaid.greaterThan(0) ? balanceDue.isZero() ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID
           : invoice.dueDate && invoice.dueDate < new Date() ? InvoiceStatus.OVERDUE : InvoiceStatus.SENT;
       await tx.invoice.update({ where: { id: invoiceId }, data: { amountPaid, balanceDue, status } });
       await tx.invoiceActivity.create({ data: { invoiceId, userId, type: 'payment_deleted', message: `Payment ${payment.paymentNumber} of ₹${payment.amount.toFixed(2)} reversed` } });

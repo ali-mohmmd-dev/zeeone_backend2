@@ -10,7 +10,7 @@ export class UserService {
     const { search, role, branch, page, limit } = filters;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = { isActive: true, AND: [{ OR: [{ banned: false }, { banned: null }] }] };
 
     if (role) where.role = role;
     if (branch) where.branch = branch;

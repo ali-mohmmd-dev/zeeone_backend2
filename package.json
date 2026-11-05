@@ -16,7 +16,7 @@
     "db:seed:master": "tsx scripts/seed-master-data.ts",
     "db:migrate": "prisma migrate dev",
     "test:logging": "tsx --test src/config/logging.test.ts",
-    "test": "tsx --test src/config/logging.test.ts src/modules/invoices/money.test.ts src/modules/invoices/payment.utils.test.ts src/modules/invoices/invoice-tax.test.ts src/modules/enquiries/enquiry-list.test.ts src/modules/enquiries/enquiry-detail.test.ts src/modules/enquiries/enquiry-mutations.test.ts src/modules/enquiries/enquiry-assignment.test.ts src/modules/workflows/installation-progress.test.ts src/modules/workflows/admission-assignment.test.ts src/modules/workflows/workflow.routes.test.ts src/modules/workflows/auth.test.ts src/modules/users/user-lifecycle.test.ts"
+    "test": "tsx --test src/config/logging.test.ts src/modules/invoices/money.test.ts src/modules/invoices/payment.utils.test.ts src/modules/invoices/invoice-tax.test.ts src/modules/enquiries/enquiry-list.test.ts src/modules/enquiries/enquiry-detail.test.ts src/modules/enquiries/enquiry-mutations.test.ts src/modules/enquiries/enquiry-assignment.test.ts src/modules/workflows/installation-progress.test.ts src/modules/workflows/admission-assignment.test.ts src/modules/workflows/workflow.routes.test.ts src/modules/workflows/auth.test.ts src/modules/users/user-lifecycle.test.ts src/modules/workflows/proposal-tables.test.ts src/modules/workflows/review-regressions.test.ts src/modules/meta-leads/meta-lead.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

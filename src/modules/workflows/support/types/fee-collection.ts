@@ -40,7 +40,7 @@ export interface CourseFee {
   courseFee: Prisma.Decimal.Value | null;
   admissionFee: Prisma.Decimal.Value | null;
   semesterFee: Prisma.Decimal.Value | null;
-  agentCommission: Prisma.Decimal.Value | null;
+  agentCommission?: Prisma.Decimal.Value | null;
 }
 
 /**

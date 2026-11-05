@@ -38,7 +38,7 @@ export function getUserEffectivePermissions(user?: UserPermissionContext | null)
 
   // 1. Explicit permissions from User's associated Role model in DB
   const roleRecordPermissions = user.userRole?.permissions;
-  if (roleRecordPermissions && roleRecordPermissions.length > 0) {
+  if (roleRecordPermissions) {
     if (roleRecordPermissions.includes('*') || roleRecordPermissions.includes('all')) {
       return ['*'];
     }

@@ -27,6 +27,7 @@ import { notificationRoutes } from './modules/notifications/notification.routes.
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { reportRoutes } from './modules/reports/report.routes.js';
 import { workflowRoutes } from './modules/workflows/workflow.routes.js';
+import { metaLeadRoutes } from './modules/meta-leads/meta-lead.routes.js';
 import { uiRoutes } from './modules/workflows/ui.routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -55,6 +56,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // API v1 Routes
   await app.register(
     async (v1) => {
+      await v1.register(metaLeadRoutes, { prefix: '/integrations/meta' });
       await v1.register(authRoutes, { prefix: '/auth' });
       await v1.register(userRoutes, { prefix: '/users' });
       await v1.register(masterDataRoutes);

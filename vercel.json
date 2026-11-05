@@ -3,6 +3,7 @@
   "buildCommand": "npx prisma generate && npx tsc",
   "functions": {
     "api/index.ts": {
+      "maxDuration": 60,
       "includeFiles": "{dist/**,src/services/pdf/templates/**,node_modules/@pdfme/**}"
     }
   },

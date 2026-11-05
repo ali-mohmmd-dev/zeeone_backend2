@@ -175,6 +175,7 @@ model EnquirySource {
 }
 
 model Enquiry {
+  metaLead MetaLead?
   proposals Proposal[]
   id                String         @id @default(cuid())
   candidateName     String
@@ -689,4 +690,22 @@ enum BillingStatus {
   UNPAID
   PAID
   PARTIALLY_PAID
+}
+
+// Durable inbox: retain the external ID even if the linked enquiry is deleted.
+model MetaLead {
+  id            String   @id
+  pageId        String
+  formId        String
+  status        String   @default("PENDING")
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?
+  enquiryId     String?  @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  enquiry       Enquiry? @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@map("meta_lead")
 }

@@ -2,7 +2,7 @@ import { PrismaClient, Prisma, NotificationType } from '@prisma/client';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../../errors/app-error.js';
 import { ChangeEnquiryStatusInput, CreateEnquiryInput, EnquiryFilterInput, UpdateEnquiryInput } from './enquiry.schema.js';
 export class EnquiryService {
-    constructor(private prisma: PrismaClient) { }
+    constructor(private prisma: PrismaClient | Prisma.TransactionClient) { }
     async listEnquiries(filters: EnquiryFilterInput, user: {
         id: string;
         role: string | null;

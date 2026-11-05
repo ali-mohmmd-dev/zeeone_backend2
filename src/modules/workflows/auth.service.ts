@@ -331,6 +331,7 @@ export function createAuthService(prisma: PrismaClient, currentUser: WorkflowUse
         try {
             return await withPrismaRetry(async () => {
                 return await prisma.user.findMany({
+                    where: { isActive: true, OR: [{ banned: false }, { banned: null }] },
                     orderBy: { createdAt: 'desc' },
                     include: {
                         userRole: true,

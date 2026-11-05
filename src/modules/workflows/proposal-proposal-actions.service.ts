@@ -1,7 +1,7 @@
 import { AppError } from '../../errors/app-error.js';
 import { moneySchema, taxRateSchema } from '../../shared/utils/money.schemas.js';
 import { decimal, moneyMax } from '../../shared/utils/money.js';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import type { WorkflowUser } from './workflow-user.js';
 import { z } from 'zod';
 import { ProposalStatus } from './support/types/proposal.js';
@@ -52,14 +52,21 @@ export function createProposalProposalActionsService(prisma: PrismaClient, curre
         discountAmount: moneySchema.optional(),
         notes: z.string().optional().or(z.literal('')),
         terms: z.string().optional().or(z.literal('')),
-        items: z.array(proposalItemSchema).optional(),
+        items: z.array(proposalItemSchema).min(1).optional(),
     });
-    async function generateProposalNumber(): Promise<string> {
+    async function generateProposalNumber(tx: Prisma.TransactionClient): Promise<string> {
         const prefix = `PROP-${new Date().getFullYear()}-`;
-        const count = await prisma.proposal.count({
+        // Serialize allocation and insertion across all API instances without a new sequence table.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(734621, 1)::text`;
+        const proposals = await tx.proposal.findMany({
             where: { proposalNo: { startsWith: prefix } },
+            select: { proposalNo: true },
         });
-        return `${prefix}${String(count + 1).padStart(4, '0')}`;
+        const highest = proposals.reduce((max, proposal) => {
+            const suffix = proposal.proposalNo.slice(prefix.length);
+            return /^\d+$/.test(suffix) ? Math.max(max, Number(suffix)) : max;
+        }, 0);
+        return `${prefix}${String(highest + 1).padStart(4, '0')}`;
     }
     const getProposalsSchema = z.object({}).optional();
     async function getProposals(input: unknown = undefined) {
@@ -165,8 +172,7 @@ export function createProposalProposalActionsService(prisma: PrismaClient, curre
             }
             logStep?.('current_user_resolved', { userId: currentUser?.id });
             logStep?.('proposal_number_generation_started');
-            const proposalNo = await generateProposalNumber();
-            logStep?.('proposal_number_generated', { proposalNo });
+            let proposalNo = '';
             // Resolve branch: prioritize passed branch, then currentUser branch, then fallback
             const effectiveBranch = parsedInput.branch && parsedInput.branch.trim() !== ''
                 ? parsedInput.branch.trim()
@@ -205,49 +211,53 @@ export function createProposalProposalActionsService(prisma: PrismaClient, curre
             let savedProposal: any = null;
             {
                 logStep?.('database_insert_started', { itemCount: processedItems.length });
-                savedProposal = await prisma.proposal.create({
-                    data: {
-                        id: proposalId,
-                        proposalNo,
-                        title: parsedInput.title || `Quotation for ${parsedInput.clientName}`,
-                        clientName: parsedInput.clientName.trim(),
-                        clientEmail: parsedInput.clientEmail?.trim() || null,
-                        clientPhone: parsedInput.clientPhone?.trim() || null,
-                        clientAddress: parsedInput.clientAddress?.trim() || null,
-                        branch: effectiveBranch,
-                        branchId: effectiveBranchId,
-                        enquiryId: parsedInput.enquiryId?.trim() || null,
-                        status: parsedInput.status || ProposalStatus.DRAFT,
-                        validUntil: validUntilDate,
-                        subtotal,
-                        taxRate,
-                        taxAmount,
-                        discountAmount,
-                        totalAmount,
-                        notes: parsedInput.notes || null,
-                        terms: parsedInput.terms ||
-                            '1. Proposal is valid for 15 days from issue date.\n2. Payment: 50% advance, 50% upon delivery/completion.\n3. Net metering and solar grid synchronization subject to KSEB approval.',
-                        createdById: currentUser?.id || null,
-                        createdByUser: currentUser?.name || 'CRM Team',
-                        items: {
-                            create: processedItems.map((item) => ({
-                                id: `pitem_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                                description: item.description,
-                                quantity: item.quantity,
-                                unitPrice: item.unitPrice,
-                                total: item.total,
-                                panelBrand: item.panelBrand,
-                                systemPrice: item.systemPrice,
-                                ksebFee: item.ksebFee,
-                                afterSubsidy: item.afterSubsidy,
-                                itemTaxRate: item.itemTaxRate,
-                            })),
+                savedProposal = await prisma.$transaction(async (tx) => {
+                    proposalNo = await generateProposalNumber(tx);
+                    logStep?.('proposal_number_generated', { proposalNo });
+                    return tx.proposal.create({
+                        data: {
+                            id: proposalId,
+                            proposalNo,
+                            title: parsedInput.title || `Quotation for ${parsedInput.clientName}`,
+                            clientName: parsedInput.clientName.trim(),
+                            clientEmail: parsedInput.clientEmail?.trim() || null,
+                            clientPhone: parsedInput.clientPhone?.trim() || null,
+                            clientAddress: parsedInput.clientAddress?.trim() || null,
+                            branch: effectiveBranch,
+                            branchId: effectiveBranchId,
+                            enquiryId: parsedInput.enquiryId?.trim() || null,
+                            status: parsedInput.status || ProposalStatus.DRAFT,
+                            validUntil: validUntilDate,
+                            subtotal,
+                            taxRate,
+                            taxAmount,
+                            discountAmount,
+                            totalAmount,
+                            notes: parsedInput.notes || null,
+                            terms: parsedInput.terms ||
+                                '1. Proposal is valid for 15 days from issue date.\n2. Payment: 50% advance, 50% upon delivery/completion.\n3. Net metering and solar grid synchronization subject to KSEB approval.',
+                            createdById: currentUser?.id || null,
+                            createdByUser: currentUser?.name || 'CRM Team',
+                            items: {
+                                create: processedItems.map((item) => ({
+                                    id: `pitem_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                                    description: item.description,
+                                    quantity: item.quantity,
+                                    unitPrice: item.unitPrice,
+                                    total: item.total,
+                                    panelBrand: item.panelBrand,
+                                    systemPrice: item.systemPrice,
+                                    ksebFee: item.ksebFee,
+                                    afterSubsidy: item.afterSubsidy,
+                                    itemTaxRate: item.itemTaxRate,
+                                })),
+                            },
                         },
-                    },
-                    include: {
-                        items: true,
-                    },
-                });
+                        include: {
+                            items: true,
+                        },
+                    });
+                }, { maxWait: 15000, timeout: 30000 });
             }
             logStep?.('database_insert_succeeded', { recordId: savedProposal.id, proposalNo });
             // If created from an enquiry, optionally update enquiry lastContactDate
@@ -258,9 +268,6 @@ export function createProposalProposalActionsService(prisma: PrismaClient, curre
                         where: { id: parsedInput.enquiryId },
                         data: {
                             lastContactDate: new Date(),
-                            notes: {
-                                set: `Proposal #${proposalNo} (Amount: ₹${totalAmount.toFixed(2)}) created.`,
-                            },
                         },
                     });
                     logStep?.('enquiry_update_succeeded');
@@ -286,96 +293,58 @@ export function createProposalProposalActionsService(prisma: PrismaClient, curre
         }
     }
     async function updateProposal(input: unknown) {
-        const parsedInput = updateProposalSchema.parse(input ?? {});
+        const { id, items, ...updateFields } = updateProposalSchema.parse(input ?? {});
         try {
-            const { id, items, ...updateFields } = parsedInput;
-            // Check existence
-            let existing: any = null;
-            {
-                existing = await prisma.proposal.findUnique({
-                    where: { id },
-                    include: { items: true },
-                });
-            }
-            if (!existing) {
-                return { success: false, message: 'Proposal not found' };
-            }
-            let subtotal = decimal(existing.subtotal);
-            let totalAmount = decimal(existing.totalAmount);
-            let taxRate = updateFields.taxRate !== undefined ? updateFields.taxRate : existing.taxRate || 0;
-            let discountAmount = updateFields.discountAmount !== undefined
-                ? updateFields.discountAmount
-                : existing.discountAmount || 0;
-            // If items are provided, recalculate totals
-            let processedItems: any[] | null = null;
-            if (items && items.length > 0) {
-                processedItems = items.map((item) => {
-                    const qty = Number(item.quantity) || 1;
-                    const price = decimal(item.unitPrice);
-                    const itemTaxRate = decimal(item.itemTaxRate || 0);
-                    const baseTotal = decimal(qty).times(price);
+            return await prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`SELECT id FROM "proposal" WHERE id = ${id} FOR UPDATE`;
+                const existing = await tx.proposal.findUnique({ where: { id }, include: { items: true } });
+                if (!existing) return { success: false, message: 'Proposal not found' };
+                const processedItems = items?.map((item) => {
+                    const baseTotal = decimal(item.unitPrice).times(item.quantity);
                     return {
                         id: item.id || `pitem_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                         description: item.description.trim(),
-                        quantity: qty,
-                        unitPrice: price,
+                        quantity: item.quantity,
+                        unitPrice: item.unitPrice,
                         panelBrand: item.panelBrand || null,
                         systemPrice: item.systemPrice ?? null,
                         ksebFee: item.ksebFee ?? null,
                         afterSubsidy: item.afterSubsidy ?? null,
-                        itemTaxRate,
-                        total: baseTotal.plus(baseTotal.times(itemTaxRate).div(100)),
+                        itemTaxRate: item.itemTaxRate,
+                        total: baseTotal.plus(baseTotal.times(item.itemTaxRate).div(100)),
                     };
                 });
-                subtotal = processedItems.reduce((acc, curr) => decimal(acc).plus(curr.total), decimal(0));
-                const taxAmount = decimal(subtotal).times(taxRate).div(100);
-                totalAmount = moneyMax(0, decimal(subtotal).plus(taxAmount).minus(discountAmount));
-            }
-            {
-                await prisma.$transaction(async (tx) => {
-                    if (processedItems) {
-                        // Delete existing items and recreate
-                        await tx.proposalItem.deleteMany({
-                            where: { proposalId: id },
-                        });
-                        await tx.proposalItem.createMany({
-                            data: processedItems.map((item) => ({
-                                id: item.id,
-                                proposalId: id,
-                                description: item.description,
-                                quantity: item.quantity,
-                                unitPrice: item.unitPrice,
-                                total: item.total,
-                                panelBrand: item.panelBrand,
-                                systemPrice: item.systemPrice,
-                                ksebFee: item.ksebFee,
-                                afterSubsidy: item.afterSubsidy,
-                                itemTaxRate: item.itemTaxRate,
-                            })),
-                        });
-                    }
-                    await tx.proposal.update({
-                        where: { id },
-                        data: {
-                            ...updateFields,
-                            ...(processedItems ? {
-                                subtotal,
-                                taxAmount: decimal(subtotal).times(taxRate).div(100),
-                                totalAmount,
-                            } : {}),
-                            updatedAt: new Date(),
-                        },
+                const subtotal = processedItems
+                    ? processedItems.reduce((sum, item) => sum.plus(item.total), decimal(0))
+                    : decimal(existing.subtotal);
+                const taxRate = updateFields.taxRate ?? existing.taxRate;
+                const discountAmount = updateFields.discountAmount ?? existing.discountAmount;
+                const taxAmount = subtotal.times(taxRate).div(100);
+                const totalAmount = moneyMax(0, subtotal.plus(taxAmount).minus(discountAmount));
+                if (processedItems) {
+                    await tx.proposalItem.deleteMany({ where: { proposalId: id } });
+                    await tx.proposalItem.createMany({
+                        data: processedItems.map(item => ({ ...item, proposalId: id })),
                     });
-                }, { maxWait: 15000, timeout: 30000 });
-            }
-            return { success: true, message: 'Proposal updated successfully' };
+                }
+                await tx.proposal.update({
+                    where: { id },
+                    data: {
+                        ...updateFields,
+                        subtotal,
+                        taxAmount,
+                        totalAmount,
+                        validUntil: updateFields.validUntil === undefined ? undefined
+                            : updateFields.validUntil ? new Date(updateFields.validUntil) : null,
+                        updatedAt: new Date(),
+                    },
+                });
+                return { success: true, message: 'Proposal updated successfully' };
+            }, { maxWait: 15000, timeout: 30000 });
         }
         catch (error) {
             console.error('Error updating proposal:', error);
-            return {
-                success: false,
-                message: error instanceof Error ? error.message : 'Failed to update proposal',
-            };
+            return { success: false, message: error instanceof Error ? error.message : 'Failed to update proposal' };
         }
     }
     const deleteProposalSchema = z.object({ id: z.string().min(1) });

@@ -36,7 +36,7 @@ export function createFeeCollectionActionsService(prisma: PrismaClient, currentU
                 }
                 // 3. Compute remaining balance before adding this receipt
                 const totalPaid = calculateTotalPaid(admission);
-                const totalFee = calculateTotalFee(admission.course);
+                const totalFee = calculateTotalFee({ ...admission.course, agentCommission: admission.agentCommission });
                 const remainingBalance = decimal(totalFee).minus(totalPaid);
                 if (decimal(data.amountCollected).greaterThan(remainingBalance)) {
                     throw new Error(`Payment of ₹${data.amountCollected.toLocaleString()} exceeds the remaining balance of ₹${remainingBalance.toLocaleString()}`);
@@ -75,40 +75,41 @@ export function createFeeCollectionActionsService(prisma: PrismaClient, currentU
                 return { error: "Unauthorized" };
             }
             const { id, nextDueDate, ...rest } = data;
-            const receipt = await prisma.receipt.update({
-                where: { id },
-                data: rest,
-            });
-            // Get the admission to update balance
-            const admission = (await prisma.admission.findFirst({
-                where: { receipts: { some: { id } } },
-                include: {
-                    course: true,
-                    receipts: {
-                        include: {
-                            createdBy: true,
-                        },
-                    },
-                },
-            })) as unknown as AdmissionWithReceiptsAndCourse;
-            if (admission) {
-                const totalPaid = calculateTotalPaid(admission);
-                const totalFee = calculateTotalFee(admission.course);
-                const balance = decimal(totalFee).minus(totalPaid);
-                // Update admission with new balance
-                await prisma.admission.update({
+            const receipt = await prisma.$transaction(async (tx) => {
+                const original = await tx.receipt.findUnique({ where: { id } });
+                if (!original) throw new Error('Receipt not found');
+                await tx.$queryRaw`SELECT id FROM "admission" WHERE id = ${original.admissionId} FOR UPDATE`;
+                const admission = await tx.admission.findUnique({
+                    where: { id: original.admissionId },
+                    include: { course: true, receipts: true },
+                });
+                if (!admission) throw new Error('Admission not found');
+                const current = admission.receipts.find(receipt => receipt.id === id);
+                if (!current) throw new Error('Receipt not found');
+                const amount = decimal(rest.amountCollected ?? current.amountCollected);
+                if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) throw new Error('Payment amount must be a valid positive number');
+                const paidByOtherReceipts = admission.receipts.reduce((sum, receipt) =>
+                    receipt.id === id ? sum : sum.plus(receipt.amountCollected), decimal(0));
+                const available = calculateTotalFee({ ...admission.course, agentCommission: admission.agentCommission }).minus(paidByOtherReceipts);
+                if (amount.greaterThan(available)) throw new Error('Payment exceeds the remaining balance');
+                const updated = await tx.receipt.update({ where: { id }, data: rest });
+                const balance = available.minus(amount);
+                await tx.admission.update({
                     where: { id: admission.id },
                     data: {
-                        nextDueDate: decimal(balance).lessThanOrEqualTo(0) ? null : nextDueDate,
-                        balance: decimal(balance).greaterThan(0) ? balance : 0,
+                        balance,
+                        nextDueDate: balance.isZero() ? null : nextDueDate,
+                        status: balance.isZero() ? AdmissionStatus.CONFIRMED
+                            : admission.status === AdmissionStatus.CONFIRMED ? AdmissionStatus.PENDING : admission.status,
                     },
                 });
-            }
+                return updated;
+            });
             return { success: true, data: receipt };
         }
         catch (error) {
             console.error("Error updating receipt:", error);
-            return { error: "Failed to update receipt" };
+            return { error: error instanceof Error ? error.message : "Failed to update receipt" };
         }
     }
     async function deleteReceipt(id: string) {
@@ -117,40 +118,28 @@ export function createFeeCollectionActionsService(prisma: PrismaClient, currentU
             if (!session?.user) {
                 return { error: "Unauthorized" };
             }
-            // Find the receipt to get the admission ID before deleting
-            const receipt = await prisma.receipt.findUnique({
-                where: { id },
-                select: { admissionId: true },
-            });
-            if (!receipt) {
-                return { error: "Receipt not found" };
-            }
-            // Delete the receipt
-            await prisma.receipt.delete({
-                where: { id },
-            });
-            // Update admission balance
-            const admission = await prisma.admission.findUnique({
-                where: { id: receipt.admissionId },
-                include: {
-                    receipts: true,
-                    course: true,
-                },
-            });
-            if (admission) {
-                // Calculate new balance
-                const totalPaid = admission.receipts.reduce((sum, receipt) => decimal(sum).plus(receipt.amountCollected), decimal(0));
-                const totalFee = decimal(admission.course.admissionFee || 0).plus((admission.course.courseFee || 0)).plus((admission.course.semesterFee || 0));
-                const balance = decimal(totalFee).minus(totalPaid);
-                // Update admission with new balance
-                await prisma.admission.update({
+            await prisma.$transaction(async (tx) => {
+                const receipt = await tx.receipt.findUnique({ where: { id } });
+                if (!receipt) throw new Error('Receipt not found');
+                await tx.$queryRaw`SELECT id FROM "admission" WHERE id = ${receipt.admissionId} FOR UPDATE`;
+                await tx.receipt.delete({ where: { id } });
+                const admission = await tx.admission.findUnique({
                     where: { id: receipt.admissionId },
+                    include: { receipts: true, course: true },
+                });
+                if (!admission) throw new Error('Admission not found');
+                const totalPaid = admission.receipts.reduce((sum, receipt) => sum.plus(receipt.amountCollected), decimal(0));
+                const balance = calculateTotalFee({ ...admission.course, agentCommission: admission.agentCommission }).minus(totalPaid);
+                await tx.admission.update({
+                    where: { id: admission.id },
                     data: {
                         nextDueDate: null,
-                        balance: decimal(balance).greaterThan(0) ? balance : 0,
+                        balance: balance.greaterThan(0) ? balance : 0,
+                        status: balance.greaterThan(0) && admission.status === AdmissionStatus.CONFIRMED
+                            ? AdmissionStatus.PENDING : admission.status,
                     },
                 });
-            }
+            });
             return { success: true };
         }
         catch (error) {
