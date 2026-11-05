@@ -12,6 +12,7 @@ export class AuthController {
     const user = await authService.login(validated);
 
     const token = await reply.jwtSign({
+      authVersion: user.authVersion,
       id: user.id,
       email: user.email,
       name: user.name,

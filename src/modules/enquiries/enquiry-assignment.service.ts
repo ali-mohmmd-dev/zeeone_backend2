@@ -33,7 +33,7 @@ export async function assignEnquiries(prisma: PrismaClient, user: AssignmentUser
     const branch = await tx.branch.findUnique({ where: { id: data.branchId } });
     if (!branch || !branch.isActive) throw new NotFoundError('Active branch');
     const assignee = await tx.user.findUnique({ where: { id: data.assignedToUserId } });
-    if (!assignee || assignee.banned) throw new NotFoundError('Active assignee');
+    if (!assignee || assignee.isActive === false || assignee.banned) throw new NotFoundError('Active assignee');
     if (assignee.branch !== data.branchId) throw new BadRequestError('Assignee must belong to the selected branch');
 
     const where = { id: { in: ids }, ...(user.role !== 'admin' ? { branchId: user.branch } : {}) };

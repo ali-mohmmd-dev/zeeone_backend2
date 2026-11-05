@@ -24,9 +24,9 @@ export function createAdmissionActionsService(prisma: PrismaClient, currentUser:
     async function getEligibleAssignee(id: string, branch?: string | null) {
         const assignee = await prisma.user.findUnique({
             where: { id },
-            select: { id: true, role: true, branch: true, banned: true, userRole: { select: { permissions: true } } },
+            select: { id: true, role: true, branch: true, banned: true, isActive: true, userRole: { select: { permissions: true } } },
         });
-        if (!assignee || assignee.banned || !isEligibleAssignee(assignee) || (branch && assignee.branch !== branch)) {
+        if (!assignee || assignee.isActive === false || assignee.banned || !isEligibleAssignee(assignee) || (branch && assignee.branch !== branch)) {
             throw new Error('Select an active user with Site Surveys & Projects permission');
         }
         return assignee;
@@ -601,7 +601,7 @@ export function createAdmissionActionsService(prisma: PrismaClient, currentUser:
         const branch = isManager(role) ? currentUser.branch : undefined;
         if (isManager(role) && !branch) return { success: true, data: [] };
         const users = await prisma.user.findMany({
-            where: { OR: [{ banned: false }, { banned: null }], ...(branch ? { branch } : {}) },
+            where: { isActive: true, OR: [{ banned: false }, { banned: null }], ...(branch ? { branch } : {}) },
             select: { id: true, name: true, role: true, branch: true, userRole: { select: { permissions: true } } },
             orderBy: { name: 'asc' },
         });

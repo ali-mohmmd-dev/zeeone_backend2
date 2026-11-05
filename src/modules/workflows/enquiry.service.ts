@@ -320,6 +320,7 @@ export function createEnquiryService(prisma: PrismaClient, currentUser: Workflow
     async function getUsers(branchId?: string): Promise<ActionResponse> {
         try {
             const where: Prisma.UserWhereInput = {
+                isActive: true, OR: [{ banned: false }, { banned: null }],
                 NOT: {
                     role: {
                         in: ['admin', 'manager'],

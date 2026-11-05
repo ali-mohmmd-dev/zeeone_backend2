@@ -1,3 +1,4 @@
+import { createUserLifecycleService } from '../users/user-lifecycle.service.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createAuthService } from './auth.service.js';
@@ -33,6 +34,13 @@ export const AuthRoutes: FastifyPluginAsync = async (app) => {
         const body = z.object({ input: z.unknown().optional() }).parse(request.body || {});
         return createAuthService(app.prisma, request.currentUser).deleteUserAction(body.input);
     });
+    for (const [path, operation] of [['getUserDeactivationPreview', 'preview'], ['reactivateUserAction', 'reactivate'], ['permanentlyDeleteUnusedUserAction', 'permanentlyDelete']] as const) {
+        app.post(`/${path}`, async request => {
+            requireWorkflowAccess(request.currentUser, 'auth', path);
+            const body = z.object({ input: z.unknown() }).parse(request.body);
+            return createUserLifecycleService(app.prisma, request.currentUser)[operation](body.input);
+        });
+    }
     app.post('/updateProfileAction', async (request) => {
         requireWorkflowAccess(request.currentUser, 'auth', 'updateProfileAction');
         const body = z.object({ input: z.unknown().optional() }).parse(request.body || {});

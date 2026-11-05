@@ -25,6 +25,8 @@ model User {
   banReason           String?
   banExpires          DateTime?
   password            String?
+  isActive            Boolean        @default(true)
+  authVersion         Int            @default(0)
   accounts            Account[]
   sessions            Session[]
   createdAdmissions   Admission[]    @relation("CreatedAdmissions")
@@ -48,6 +50,23 @@ model User {
   createdReceipts     Receipt[]      @relation("CreatedReceipts")
 
   @@map("user")
+}
+
+// Snapshots deliberately survive removal of an unused account.
+model UserLifecycleEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  userName     String
+  actorId      String
+  actorName    String
+  action       String
+  replacementId String?
+  replacementName String?
+  transfers    Json
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("user_lifecycle_event")
 }
 
 model Account {

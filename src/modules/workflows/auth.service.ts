@@ -1,3 +1,4 @@
+import { createUserLifecycleService } from '../users/user-lifecycle.service.js';
 import type { PrismaClient } from '@prisma/client';
 import type { WorkflowUser } from './workflow-user.js';
 import { withPrismaRetry } from './database-retry.js';
@@ -274,49 +275,9 @@ export function createAuthService(prisma: PrismaClient, currentUser: WorkflowUse
             };
         }
     }
-    const deleteUserActionSchema = z.object({
-        userId: z.string(),
-    });
+    // Compatibility endpoint: removing a user now preserves records and deactivates access.
     async function deleteUserAction(input: unknown) {
-        const { userId } = deleteUserActionSchema.parse(input ?? {});
-        try {
-            const targetUser = await prisma.user.findUnique({
-                where: { id: userId },
-            });
-            if (!targetUser) {
-                return { success: false, message: 'User not found' };
-            }
-            if (targetUser.role === 'admin' || targetUser.email === 'admin@elevate.com') {
-                return {
-                    success: false,
-                    message: 'Security policy: The primary administrator account cannot be deleted',
-                };
-            }
-            await prisma.user.delete({
-                where: { id: userId },
-            });
-            await cacheService.delete(`user:${userId}`);
-            if (targetUser.email) {
-                await cacheService.delete(`user:email:${targetUser.email}`);
-            }
-            return {
-                success: true,
-                message: 'User deleted successfully',
-            };
-        }
-        catch (error: any) {
-            console.error('Delete user error:', error);
-            if (error?.code === 'P2003') {
-                return {
-                    success: false,
-                    message: 'This user is linked to existing CRM records and cannot be deleted yet.',
-                };
-            }
-            return {
-                success: false,
-                message: error?.message || 'Failed to delete user',
-            };
-        }
+        return createUserLifecycleService(prisma, currentUser).deactivate(input);
     }
     const updateProfileActionSchema = z.object({
         name: z.string().min(2),

@@ -65,9 +65,9 @@ export function createJobOrderService(prisma: PrismaClient, currentUser: Workflo
             // Verify manager exists and get branch from manager if branchId not provided
             const manager = await prisma.user.findUnique({
                 where: { id: managerId },
-                select: { id: true, branch: true },
+                select: { id: true, branch: true, isActive: true, banned: true },
             });
-            if (!manager) {
+            if (!manager || manager.isActive === false || manager.banned) {
                 return {
                     success: false,
                     message: 'Manager not found',
@@ -422,9 +422,14 @@ export function createJobOrderService(prisma: PrismaClient, currentUser: Workflo
                     };
                 }
             }
+            const transferHistory = await prisma.userLifecycleEvent.findMany({
+                where: { action: 'DEACTIVATED', transfers: { path: ['jobs'], array_contains: [{ id }] } },
+                select: { id: true, userName: true, actorName: true, replacementName: true, createdAt: true },
+                orderBy: { createdAt: 'asc' },
+            });
             return {
                 success: true,
-                data: jobOrder,
+                data: { ...jobOrder, transferHistory },
                 message: 'Job order fetched successfully',
             };
         }
@@ -583,7 +588,7 @@ export function createJobOrderService(prisma: PrismaClient, currentUser: Workflo
             const newManager = await prisma.user.findUnique({
                 where: { id: newManagerId }
             });
-            if (!newManager) {
+            if (!newManager || newManager.isActive === false || newManager.banned) {
                 return {
                     success: false,
                     message: 'New manager user not found'

@@ -67,7 +67,7 @@ export function createEnquiryActionService(prisma: PrismaClient, _currentUser: W
     async function getUsers(input: unknown) {
         const parsedInput = getUsersSchema.parse(input ?? {});
         try {
-            const where: Prisma.UserWhereInput = {};
+            const where: Prisma.UserWhereInput = { isActive: true, OR: [{ banned: false }, { banned: null }] };
             if (parsedInput.branchId) {
                 where.branch = parsedInput.branchId;
             }

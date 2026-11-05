@@ -17,6 +17,8 @@ export class AuthService {
       throw new UnauthorizedError('Invalid email or password');
     }
 
+    if (user.isActive === false) throw new UnauthorizedError('This account has been deactivated');
+
     if (user.banned) {
       throw new UnauthorizedError(`Account is banned: ${user.banReason || 'No reason specified'}`);
     }
@@ -33,6 +35,7 @@ export class AuthService {
     const permissions = getUserEffectivePermissions(user);
 
     return {
+      authVersion: user.authVersion,
       id: user.id,
       email: user.email,
       name: user.name,

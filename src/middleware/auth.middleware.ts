@@ -30,6 +30,10 @@ export async function authenticate(request: FastifyRequest, _reply: FastifyReply
       throw new UnauthorizedError('User account not found');
     }
 
+    if (user.isActive === false || (decoded.authVersion ?? 0) !== (user.authVersion ?? 0)) {
+      throw new UnauthorizedError('Account deactivated or session revoked. Please sign in again.');
+    }
+
     if (user.banned) {
       throw new UnauthorizedError('User account is banned');
     }

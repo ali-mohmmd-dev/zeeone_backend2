@@ -147,6 +147,10 @@ export class EnquiryService {
         const sourceId = input.sourceId?.trim() || null;
         const assignedToUserId = input.assignedToUserId?.trim() || (role === 'telecaller' ? user.id : null);
 
+        if (assignedToUserId && assignedToUserId !== user.id) {
+            const assignee = await this.prisma.user.findUnique({ where: { id: assignedToUserId }, select: { isActive: true, banned: true } });
+            if (!assignee || assignee.isActive === false || assignee.banned) throw new BadRequestError('Select an active assignee');
+        }
         logStep?.('database_insert_started');
         const enquiry = await this.prisma.enquiry.create({
             data: {

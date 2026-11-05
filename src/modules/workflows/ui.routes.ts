@@ -33,7 +33,7 @@ export const uiRoutes: FastifyPluginAsync = async (app) => {
         const branches = user.role === 'admin'
             ? await app.prisma.branch.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
         const availableManagers = canAssign ? await app.prisma.user.findMany({
-            where: { role: { in: ['executive', 'manager', 'telecaller', 'job_orders', 'joborders'] }, OR: [{ banned: false }, { banned: null }], ...(user.role !== 'admin' ? { branch: user.branch } : {}) },
+            where: { isActive: true, role: { in: ['executive', 'manager', 'telecaller', 'job_orders', 'joborders'] }, OR: [{ banned: false }, { banned: null }], ...(user.role !== 'admin' ? { branch: user.branch } : {}) },
             select: { id: true, name: true, email: true }, orderBy: { name: 'asc' },
         }) : [];
         return { branches, availableManagers };

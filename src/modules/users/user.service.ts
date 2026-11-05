@@ -1,6 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { NotFoundError } from '../../errors/app-error.js';
+import { BadRequestError, NotFoundError } from '../../errors/app-error.js';
 import { UpdateUserInput, UserFilterInput } from './user.schema.js';
 
 export class UserService {
@@ -34,6 +34,7 @@ export class UserService {
           role: true,
           branch: true,
           image: true,
+          isActive: true,
           banned: true,
           banReason: true,
           createdAt: true,
@@ -56,6 +57,7 @@ export class UserService {
         role: true,
         branch: true,
         image: true,
+        isActive: true,
         banned: true,
         banReason: true,
         createdAt: true,
@@ -79,6 +81,7 @@ export class UserService {
         email: true,
         role: true,
         branch: true,
+        isActive: true,
         banned: true,
         banReason: true,
         updatedAt: true,
@@ -98,6 +101,6 @@ export class UserService {
 
   async deleteUser(id: string) {
     await this.getUserById(id);
-    return this.prisma.user.delete({ where: { id } });
+    throw new BadRequestError('Use the user deactivation workflow to review and transfer pending work');
   }
 }
